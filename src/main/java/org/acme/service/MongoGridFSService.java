@@ -40,21 +40,22 @@ public class MongoGridFSService {
 
     private final static Logger LOG = LoggerFactory.getLogger(MongoGridFSService.class);
 
-    // Communicates with the Grid iteself
+    // Communicates with the Grid itself
     private GridFSBucket gridFSBucket;
 
-    //    @ConfigProperty(name = "quarkus.mongodb.database")
+    // Holds the database name
     private String databaseName;
 
-    //    @ConfigProperty(name = "gridfs.bucketName")
+    // Holds the files bucket name
     private String bucketName;
 
-    //    @ConfigProperty(name = "gridFSChunkSize", defaultValue = "1048576")
+    // Holds the chunk size to send files
     private Integer chunkSize;
 
-    //    @Inject
+    // Holds the MongoClient
     private MongoClient client;
 
+    // Holds the database
     private MongoDatabase database;
 
     @Inject
@@ -216,7 +217,7 @@ public class MongoGridFSService {
             }
         }
 
-        LOG.info("Running query with Filters: {} and Sorting: {} - {}", query, sortDir, sortByFields);
+        LOG.debug("Running query with Filters: {} and Sorting: {} - {}", query, sortDir, sortByFields);
         gridFSFiles.forEach(file -> {
             FileInfo info = new FileInfo();
             info.filename = file.getFilename();
@@ -265,7 +266,7 @@ public class MongoGridFSService {
 
         Bson bson = Filters.eq("_id", parseObjectId(id));
         GridFSFile file = gridFSBucket.find(bson).first();
-        LOG.info("Found file: {}", file);
+
         FileInfo info = null;
         if (file != null) {
             info = new FileInfo();
