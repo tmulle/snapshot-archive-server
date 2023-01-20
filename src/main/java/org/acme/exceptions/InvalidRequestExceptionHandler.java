@@ -1,5 +1,4 @@
-package org.acme;
-
+package org.acme.exceptions;
 
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
@@ -12,18 +11,18 @@ import javax.ws.rs.ext.ExceptionMapper;
 import javax.ws.rs.ext.Provider;
 
 @Provider
-public class GeneralExceptionHandler implements ExceptionMapper<Exception> {
+public class InvalidRequestExceptionHandler implements ExceptionMapper<InvalidRequestException> {
 
-    private final static Logger LOG = LoggerFactory.getLogger(GeneralExceptionHandler.class);
+    private final static Logger LOG = LoggerFactory.getLogger(InvalidRequestExceptionHandler.class);
 
     @Override
-    public Response toResponse(Exception e) {
+    public Response toResponse(InvalidRequestException e) {
         Throwable rootCause = ExceptionUtils.getRootCause(e);
         JsonObject error = Json.createObjectBuilder().add("error", rootCause.getMessage()).build();
 
-        LOG.error("General Exception", e);
+        LOG.error("Invalid Request Exception", e);
 
-        return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+        return Response.status(Response.Status.BAD_REQUEST)
                 .entity(error.toString()).build();
     }
 }

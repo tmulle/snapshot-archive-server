@@ -8,7 +8,6 @@ import com.mongodb.client.gridfs.GridFSFindIterable;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
 import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Projections;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.acme.exceptions.InvalidRequestException;
@@ -21,7 +20,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.PostConstruct;
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import java.io.*;
@@ -43,28 +41,35 @@ public class MongoGridFSService {
     // Communicates with the Grid iteself
     private GridFSBucket gridFSBucket;
 
-    @ConfigProperty(name = "quarkus.mongodb.database")
-    String databaseName;
+//    @ConfigProperty(name = "quarkus.mongodb.database")
+    private String databaseName;
 
-    @ConfigProperty(name = "gridfs.bucketName")
-    String bucketName;
+//    @ConfigProperty(name = "gridfs.bucketName")
+    private String bucketName;
 
-    @ConfigProperty(name = "gridFSChunkSize", defaultValue = "1048576")
-    Integer chunkSize;
+//    @ConfigProperty(name = "gridFSChunkSize", defaultValue = "1048576")
+    private Integer chunkSize;
 
-    @Inject
-    MongoClient client;
+//    @Inject
+    private MongoClient client;
 
     private MongoDatabase database;
 
-    @PostConstruct
-    public void init() {
+    @Inject
+    public MongoGridFSService(@ConfigProperty(name = "quarkus.mongodb.database") String databaseName,
+                              @ConfigProperty(name = "gridfs.bucketName") String fileBucketName,
+                              @ConfigProperty(name = "gridFSChunkSize", defaultValue = "1048576") int fileChunkSize,
+                              MongoClient client) {
+
         database = client.getDatabase(databaseName);
-        if (bucketName != null && !bucketName.isEmpty()) {
-            gridFSBucket = GridFSBuckets.create(database, bucketName);
+        if (fileBucketName != null && !fileBucketName.isEmpty()) {
+            gridFSBucket = GridFSBuckets.create(database, fileBucketName);
         } else {
             gridFSBucket = GridFSBuckets.create(database);
         }
+
+        chunkSize = fileChunkSize;
+        this.client = client;
     }
 
     /**
@@ -145,6 +150,9 @@ public class MongoGridFSService {
         // Default empty query
         Bson query = Filters.empty();
 
+        int recordLimit = 0;
+        int skipRecord = 0;
+
         // Build up query from the params
         if (queryParams != null || queryParams.isEmpty()) {
 
@@ -153,7 +161,7 @@ public class MongoGridFSService {
 
             // Check for ticketNumber
             String ticketNumber = queryParams.get("ticketNumber");
-            if (ticketNumber != null) {
+            if (ticketNumber != null && !ticketNumber.isEmpty()) {
                 filters.add(Filters.eq("metadata.ticketNumber", ticketNumber));
             }
 
@@ -181,6 +189,26 @@ public class MongoGridFSService {
                 }
             }
 
+            // read any limit
+            String limitParam = queryParams.get("limit");
+            if (limitParam != null && !limitParam.isEmpty()) {
+                try {
+                    recordLimit = Integer.parseInt(limitParam);
+                } catch (NumberFormatException nfe) {
+                    throw new InvalidRequestException("limit param must be a whole number");
+                }
+            }
+
+            // read any skip count
+            String skipParam = queryParams.get("skip");
+            if (skipParam != null && !skipParam.isEmpty()) {
+                try {
+                    skipRecord = Integer.parseInt(skipParam);
+                } catch (NumberFormatException nfe) {
+                    throw new InvalidRequestException("skip param must be a whole number");
+                }
+            }
+
             // Build the filter chain
             if (!filters.isEmpty()) {
                 query = Filters.and(filters);
@@ -190,7 +218,19 @@ public class MongoGridFSService {
         LOG.info("Running query with Filters: {}", query);
 
         // run the query
-        gridFSBucket.find(query).forEach(file -> {
+        GridFSFindIterable gridFSFiles = gridFSBucket.find(query);
+
+        // Are we limiting the return size
+        if (recordLimit > 0) {
+            gridFSFiles.limit(recordLimit);
+        }
+
+        // Skipping any records?
+        if (skipRecord > 0) {
+            gridFSFiles.skip(skipRecord);
+        }
+
+        gridFSFiles.forEach(file -> {
             FileInfo info = new FileInfo();
             info.fileName = file.getFilename();
             info.size = file.getLength();
@@ -236,6 +276,7 @@ public class MongoGridFSService {
 
         Bson bson = Filters.eq("_id", new ObjectId(id));
         GridFSFile file = gridFSBucket.find(bson).first();
+        LOG.info("Found file: {}", file);
         FileInfo info = null;
         if (file != null) {
             info = new FileInfo();
@@ -249,10 +290,24 @@ public class MongoGridFSService {
         return Optional.ofNullable(info);
     }
 
+    /**
+     * Returns if a hash is already stored in the db
+     *
+     * @param hash SHA256 hash
+     * @return true or false
+     */
     public boolean hashExists(String hash) {
         Objects.requireNonNull(hash, "Hash is required");
         long count = database.getCollection("fs.files").countDocuments(Filters.eq("metadata.sha256", hash));
         return count > 0;
+    }
+
+    /**
+     * Get the total file count
+     * @return
+     */
+    public long totalFileCount() {
+        return database.getCollection("fs.files").countDocuments();
     }
 
     @NoArgsConstructor
