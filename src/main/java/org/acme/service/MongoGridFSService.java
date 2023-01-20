@@ -8,6 +8,8 @@ import com.mongodb.client.gridfs.GridFSFindIterable;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.acme.exceptions.InvalidRequestException;
@@ -41,16 +43,16 @@ public class MongoGridFSService {
     // Communicates with the Grid iteself
     private GridFSBucket gridFSBucket;
 
-//    @ConfigProperty(name = "quarkus.mongodb.database")
+    //    @ConfigProperty(name = "quarkus.mongodb.database")
     private String databaseName;
 
-//    @ConfigProperty(name = "gridfs.bucketName")
+    //    @ConfigProperty(name = "gridfs.bucketName")
     private String bucketName;
 
-//    @ConfigProperty(name = "gridFSChunkSize", defaultValue = "1048576")
+    //    @ConfigProperty(name = "gridFSChunkSize", defaultValue = "1048576")
     private Integer chunkSize;
 
-//    @Inject
+    //    @Inject
     private MongoClient client;
 
     private MongoDatabase database;
@@ -58,7 +60,7 @@ public class MongoGridFSService {
     @Inject
     public MongoGridFSService(@ConfigProperty(name = "quarkus.mongodb.database") String databaseName,
                               @ConfigProperty(name = "gridfs.bucketName") String fileBucketName,
-                              @ConfigProperty(name = "gridFSChunkSize", defaultValue = "1048576") int fileChunkSize,
+                              @ConfigProperty(name = "gridfs.chunkSize") int fileChunkSize,
                               MongoClient client) {
 
         database = client.getDatabase(databaseName);
@@ -78,7 +80,7 @@ public class MongoGridFSService {
      * @param file Path of the file
      * @return ObjectId of new file
      */
-    public ObjectId uploadFile(Path file, String fileName, String ticketNumber)  {
+    public ObjectId uploadFile(Path file, String fileName, String ticketNumber) {
         Objects.requireNonNull(file, "Path is required");
         Objects.requireNonNull(fileName, "Filename is required");
 
@@ -90,7 +92,6 @@ public class MongoGridFSService {
         }
 
     }
-
 
 
     /**
@@ -105,26 +106,33 @@ public class MongoGridFSService {
         Objects.requireNonNull(inputStream, "InputStream is required");
         Objects.requireNonNull(fileName, "Filename is required");
 
+
+        // Generate a hash and store in metadata
+        String sha256 = null;
         try {
-            // Generate a hash and store in metadata
-            String sha256 = DigestUtils.sha256Hex(inputStream);
+            sha256 = DigestUtils.sha256Hex(inputStream);
             inputStream.mark(0); //reset stream
             inputStream.reset();
+        } catch (IOException ex) {
+            throw new RuntimeException("Error generating hash for file", ex);
+        }
 
-            // Check if we already have the hash
-            // if so return error
-            if (hashExists(sha256)) throw new InvalidRequestException("A documents already exists with hash: " + sha256);
+        // Check if we already have the hash
+        // if so return error
+        if (hashExists(sha256))
+            throw new InvalidRequestException("A documents already exists with hash: " + sha256);
 
-            // We are unique
-            // Create the meta
-            Document metaData = new Document();
-            metaData.append("sha256", sha256);
+        // We are unique
+        // Create the meta
+        Document metaData = new Document();
+        metaData.append("sha256", sha256);
 
-            // Append ticket number if supplied
-            if (ticketNumber != null && !ticketNumber.isEmpty()) {
-                metaData.append("ticketNumber", ticketNumber);
-            }
+        // Append ticket number if supplied
+        if (ticketNumber != null && !ticketNumber.isEmpty()) {
+            metaData.append("ticketNumber", ticketNumber);
+        }
 
+        try {
             // Create the options
             GridFSUploadOptions options = new GridFSUploadOptions()
                     .chunkSizeBytes(chunkSize)
@@ -147,11 +155,14 @@ public class MongoGridFSService {
         // Holds the results
         List<FileInfo> items = new ArrayList<>();
 
-        // Default empty query
+        // Default empty query used when there are no params
         Bson query = Filters.empty();
 
+        // Holds the defaults for the incoming parameters
         int recordLimit = 0;
         int skipRecord = 0;
+        String sortDir = null;
+        List<String> sortByFields = null;
 
         // Build up query from the params
         if (queryParams != null || queryParams.isEmpty()) {
@@ -159,63 +170,29 @@ public class MongoGridFSService {
             // Holds all the conditions
             List<Bson> filters = new ArrayList<>();
 
-            // Check for ticketNumber
-            String ticketNumber = queryParams.get("ticketNumber");
-            if (ticketNumber != null && !ticketNumber.isEmpty()) {
-                filters.add(Filters.eq("metadata.ticketNumber", ticketNumber));
-            }
+            // Parse the ticketnumber
+            parseTicketNumber(queryParams, filters);
 
-            String startDate = queryParams.get("startDate");
-            String endDate = queryParams.get("endDate");
-
-            // if specifying one, you need the other
-            if ((startDate != null && endDate == null) || (startDate == null && endDate != null)) {
-                throw new InvalidRequestException("Both startDate and endDate are required");
-            }
-
-            if (startDate != null && endDate != null) {
-
-                // Convert to date objects
-                SimpleDateFormat sdf = new SimpleDateFormat("MM-dd-yyyy");
-                sdf.setLenient(false);
-                try {
-                    Date start = sdf.parse(startDate);
-                    Date end = sdf.parse(endDate);
-                    filters.add(Filters.gte("uploadDate", start));
-                    filters.add(Filters.lte("uploadDate", end));
-
-                } catch (ParseException e) {
-                    throw new InvalidRequestException("Cannot parse either startDate or endDate values");
-                }
-            }
+            // Date parsing
+            parseDateParams(queryParams, filters);
 
             // read any limit
-            String limitParam = queryParams.get("limit");
-            if (limitParam != null && !limitParam.isEmpty()) {
-                try {
-                    recordLimit = Integer.parseInt(limitParam);
-                } catch (NumberFormatException nfe) {
-                    throw new InvalidRequestException("limit param must be a whole number");
-                }
-            }
+            recordLimit = parseRecordLimit(queryParams);
 
             // read any skip count
-            String skipParam = queryParams.get("skip");
-            if (skipParam != null && !skipParam.isEmpty()) {
-                try {
-                    skipRecord = Integer.parseInt(skipParam);
-                } catch (NumberFormatException nfe) {
-                    throw new InvalidRequestException("skip param must be a whole number");
-                }
-            }
+            skipRecord = parseSkipCount(queryParams);
+
+            // Sorting
+            sortByFields = parseSortingFields(queryParams);
+
+            // Sort direction
+            sortDir = parseSortingDirection(queryParams);
 
             // Build the filter chain
             if (!filters.isEmpty()) {
                 query = Filters.and(filters);
             }
         }
-
-        LOG.info("Running query with Filters: {}", query);
 
         // run the query
         GridFSFindIterable gridFSFiles = gridFSBucket.find(query);
@@ -230,10 +207,20 @@ public class MongoGridFSService {
             gridFSFiles.skip(skipRecord);
         }
 
+        // if we have any sorting
+        if (sortDir != null && !sortByFields.isEmpty()) {
+            if ("ASC".equals(sortDir)) {
+                gridFSFiles.sort(Sorts.ascending(sortByFields));
+            } else {
+                gridFSFiles.sort(Sorts.descending(sortByFields));
+            }
+        }
+
+        LOG.info("Running query with Filters: {} and Sorting: {} - {}", query, sortDir, sortByFields);
         gridFSFiles.forEach(file -> {
             FileInfo info = new FileInfo();
-            info.fileName = file.getFilename();
-            info.size = file.getLength();
+            info.filename = file.getFilename();
+            info.length = file.getLength();
             info.uploadDate = file.getUploadDate();
             info.id = file.getObjectId().toString();
             info.metaData = file.getMetadata();
@@ -243,8 +230,10 @@ public class MongoGridFSService {
         return items;
     }
 
+
     /**
      * Delete a file from the Grid
+     *
      * @param id
      */
     public void deleteFile(String id) {
@@ -255,7 +244,7 @@ public class MongoGridFSService {
     /**
      * Download the file by ObjectID
      *
-     * @param id ObjectId string
+     * @param id           ObjectId string
      * @param outputStream OutputStream to write the data
      */
     public void downloadFile(String id, OutputStream outputStream) {
@@ -280,8 +269,8 @@ public class MongoGridFSService {
         FileInfo info = null;
         if (file != null) {
             info = new FileInfo();
-            info.fileName = file.getFilename();
-            info.size = file.getLength();
+            info.filename = file.getFilename();
+            info.length = file.getLength();
             info.uploadDate = file.getUploadDate();
             info.id = file.getObjectId().toString();
             info.metaData = file.getMetadata();
@@ -304,20 +293,166 @@ public class MongoGridFSService {
 
     /**
      * Get the total file count
+     *
      * @return
      */
     public long totalFileCount() {
         return database.getCollection("fs.files").countDocuments();
     }
 
+
+    /**
+     * Parse the sorting direction
+     *
+     * @param queryParams
+     * @return
+     */
+    private String parseSortingDirection(Map<String, String> queryParams) {
+        String sortDirParam = queryParams.get("sortDir");
+        String sortDir = null;
+        if (sortDirParam != null && !sortDirParam.isEmpty()) {
+            if ("ASC".equalsIgnoreCase(sortDirParam)) {
+                sortDir = "ASC";
+            } else if ("DESC".equalsIgnoreCase(sortDirParam)) {
+                sortDir = "DESC";
+            }
+        }
+        return sortDir;
+    }
+
+    /**
+     * Parse the sorting fields
+     *
+     * @param queryParams
+     * @return
+     */
+    private List<String> parseSortingFields(Map<String, String> queryParams) {
+        String sortFields = queryParams.get("sortFields");
+        List<String> sortByFields = null;
+
+        if (sortFields != null && !sortFields.isEmpty()) {
+            String[] strings = sortFields.split(",");
+
+            // If we have fields specified
+            // need to rewrite the "id" column to internal "_id"
+            // all others we pass through
+            if (strings.length > 0) {
+                sortByFields = new ArrayList<>();
+                for (String s : strings) {
+                    if ("id".equalsIgnoreCase(s)) {
+                        sortByFields.add("_id");
+                    } else {
+                        sortByFields.add(s);
+                    }
+                }
+            }
+        }
+        return sortByFields;
+    }
+
+    /**
+     * Parse skip count
+     *
+     * @param queryParams
+     * @return
+     */
+    private int parseSkipCount(Map<String, String> queryParams) {
+        String skipParam = queryParams.get("skip");
+        int skipRecord = 0;
+        if (skipParam != null && !skipParam.isEmpty()) {
+            try {
+                skipRecord = Integer.parseInt(skipParam);
+            } catch (NumberFormatException nfe) {
+                throw new InvalidRequestException("skip param must be a whole number");
+            }
+        }
+        return skipRecord;
+    }
+
+    /**
+     * Parse record limit
+     *
+     * @param queryParams
+     * @return
+     */
+    private int parseRecordLimit(Map<String, String> queryParams) {
+        String limitParam = queryParams.get("limit");
+        int recordLimit = 0;
+        if (limitParam != null && !limitParam.isEmpty()) {
+            try {
+                recordLimit = Integer.parseInt(limitParam);
+            } catch (NumberFormatException nfe) {
+                throw new InvalidRequestException("limit param must be a whole number");
+            }
+        }
+        return recordLimit;
+    }
+
+    /**
+     * Parse date params
+     *
+     * @param queryParams
+     * @param filters
+     */
+    private void parseDateParams(Map<String, String> queryParams, List<Bson> filters) {
+        String startDate = queryParams.get("startDate");
+        String endDate = queryParams.get("endDate");
+
+        if (startDate != null || endDate != null) {
+            // Convert to date objects
+            SimpleDateFormat sdf = new SimpleDateFormat("MM-dd-yyyy");
+            sdf.setLenient(false);
+
+            // Start Date
+            if (startDate != null) {
+                Date start = null;
+                try {
+                    start = sdf.parse(startDate);
+                } catch (ParseException e) {
+                    throw new InvalidRequestException("Cannot parse startDate");
+                }
+                filters.add(Filters.gte("uploadDate", start));
+            }
+
+            // End Date
+            if (endDate != null) {
+                Date end = null;
+                try {
+                    end = sdf.parse(endDate);
+                } catch (ParseException e) {
+                    throw new InvalidRequestException("Cannot parse endDate");
+                }
+                filters.add(Filters.lte("uploadDate", end));
+            }
+        }
+    }
+
+    /**
+     * Parse ticket number
+     *
+     * @param queryParams
+     * @param filters
+     */
+    private void parseTicketNumber(Map<String, String> queryParams, List<Bson> filters) {
+        // Check for ticketNumber
+        String ticketNumber = queryParams.get("ticketNumber");
+        if (ticketNumber != null && !ticketNumber.isEmpty()) {
+            filters.add(Filters.eq("metadata.ticketNumber", ticketNumber));
+        }
+    }
+
+    /**
+     * Info class to map from a GridFSFile to POJO
+     */
     @NoArgsConstructor
     @Getter
+    @RegisterForReflection
     public static class FileInfo {
 
         String id;
 
-        String fileName;
-        Long size;
+        String filename;
+        Long length;
         Date uploadDate;
 
         Map<String, Object> metaData;
