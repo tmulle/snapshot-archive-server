@@ -18,9 +18,8 @@ public class GeneralExceptionHandler implements ExceptionMapper<Exception> {
 
     @Override
     public Response toResponse(Exception e) {
-        Throwable rootCause = ExceptionUtils.getRootCause(e);
-        JsonObject error = Json.createObjectBuilder().add("error", rootCause.getMessage()).build();
 
+        JsonObject error = Json.createObjectBuilder().add("error", e.getMessage()).build();
         LOG.error("General Exception", e);
 
         return Response.status(Response.Status.INTERNAL_SERVER_ERROR)

@@ -238,7 +238,7 @@ public class MongoGridFSService {
      */
     public void deleteFile(String id) {
         Objects.requireNonNull(id, "Id is required");
-        gridFSBucket.delete(new ObjectId(id));
+        gridFSBucket.delete(parseObjectId(id));
     }
 
     /**
@@ -251,7 +251,7 @@ public class MongoGridFSService {
         Objects.requireNonNull(id, "Id is required");
         Objects.requireNonNull(outputStream, "OutputStream is required");
 
-        gridFSBucket.downloadToStream(new ObjectId(id), outputStream);
+        gridFSBucket.downloadToStream(parseObjectId(id), outputStream);
     }
 
     /**
@@ -263,7 +263,7 @@ public class MongoGridFSService {
     public Optional<FileInfo> getFileInfo(String id) {
         Objects.requireNonNull(id, "Id is required");
 
-        Bson bson = Filters.eq("_id", new ObjectId(id));
+        Bson bson = Filters.eq("_id", parseObjectId(id));
         GridFSFile file = gridFSBucket.find(bson).first();
         LOG.info("Found file: {}", file);
         FileInfo info = null;
@@ -300,6 +300,21 @@ public class MongoGridFSService {
         return database.getCollection("fs.files").countDocuments();
     }
 
+
+    /**
+     * Returns a new ObjectID
+     *
+     * @param id
+     * @return ObjectId
+     * @throws InvalidRequestException if can't be parsed
+     */
+    private ObjectId parseObjectId(String id) {
+        try {
+            return new ObjectId(id);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidRequestException("Invalid format for id - " + id, e);
+        }
+    }
 
     /**
      * Parse the sorting direction

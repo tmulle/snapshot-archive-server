@@ -17,9 +17,8 @@ public class InvalidRequestExceptionHandler implements ExceptionMapper<InvalidRe
 
     @Override
     public Response toResponse(InvalidRequestException e) {
-        Throwable rootCause = ExceptionUtils.getRootCause(e);
-        JsonObject error = Json.createObjectBuilder().add("error", rootCause.getMessage()).build();
 
+        JsonObject error = Json.createObjectBuilder().add("error", e.getMessage()).build();
         LOG.error("Invalid Request Exception", e);
 
         return Response.status(Response.Status.BAD_REQUEST)
