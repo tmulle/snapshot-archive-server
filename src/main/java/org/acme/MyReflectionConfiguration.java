@@ -9,6 +9,8 @@ import org.acme.service.MongoGridFSService;
  *
  * We need the FileInfo from the 3rd party lib
  *
+ * Found: https://quarkus.io/guides/writing-native-applications-tips
+ *
  * @author tmulle
  */
 @RegisterForReflection(targets = {MongoGridFSService.FileInfo.class})
