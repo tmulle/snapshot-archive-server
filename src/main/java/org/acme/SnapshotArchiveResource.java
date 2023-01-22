@@ -63,7 +63,8 @@ public class SnapshotArchiveResource {
                            @Parameter(description = "Limit the number of results") @QueryParam("limit") String recordLimit,
                            @Parameter(description = "Skips the specified number of records") @QueryParam("skip") String skipRecord,
                            @Parameter(description = "Comma separated list of fields to sort on") @QueryParam("sortyBy") String sortFields,
-                           @Parameter(description = "Sort direction: ASC or DESC") @QueryParam("sortDir") String sortDir) {
+                           @Parameter(description = "Sort direction: ASC or DESC") @QueryParam("sortDir") String sortDir,
+                           @Parameter(description = "Name of file") @QueryParam("filename") String filename) {
 
         // Build up the param map to pass into the service
         Map<String, String> queryParams = new HashMap<>();
@@ -74,6 +75,7 @@ public class SnapshotArchiveResource {
         queryParams.put("skip", skipRecord);
         queryParams.put("sortFields", sortFields);
         queryParams.put("sortDir", sortDir);
+        queryParams.put("filename", filename);
 
 
         return Response.ok(mongoGridFSService.listAllFiles(queryParams)).build();
@@ -160,7 +162,7 @@ public class SnapshotArchiveResource {
     }
 
     @GET
-    @Path("/exists/{hash}")
+    @Path("/exists/hash/{hash}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Checks for the existence of the hash", description = "Checks for the existence of the hash already in the system")
     @APIResponses(value = {
@@ -173,6 +175,42 @@ public class SnapshotArchiveResource {
     })
     public Response hashExist(@Parameter(description = "SHA-256 hash") @PathParam("hash") String hash) {
         boolean hashExists = mongoGridFSService.hashExists(hash);
+        JsonObject jsonObject = Json.createObjectBuilder().add("exists", hashExists).build();
+        return Response.ok(jsonObject.toString()).build();
+    }
+
+    @GET
+    @Path("/exists/id/{id}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Checks for the existence of the file id", description = "Checks for the existence of the file id in the system")
+    @APIResponses(value = {
+            @APIResponse(responseCode = "20",
+                    description = "True if the id exists, false otherwise",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON)),
+            @APIResponse(responseCode = "400",
+                    description = "An error with the format of parameter",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON))
+    })
+    public Response fileIDExists(@Parameter(description = "File ID") @PathParam("id") String id) {
+        boolean hashExists = mongoGridFSService.fileIDExists(id);
+        JsonObject jsonObject = Json.createObjectBuilder().add("exists", hashExists).build();
+        return Response.ok(jsonObject.toString()).build();
+    }
+
+    @GET
+    @Path("/exists/name/{filename}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Checks for the existence of the file name", description = "Checks for the existence of the filename in the system")
+    @APIResponses(value = {
+            @APIResponse(responseCode = "20",
+                    description = "True if the filename exists, false otherwise",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON)),
+            @APIResponse(responseCode = "400",
+                    description = "An error with the format of parameter",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON))
+    })
+    public Response filenameExists(@Parameter(description = "Filename to look for") @PathParam("filename") String filename) {
+        boolean hashExists = mongoGridFSService.filenameExists(filename);
         JsonObject jsonObject = Json.createObjectBuilder().add("exists", hashExists).build();
         return Response.ok(jsonObject.toString()).build();
     }
