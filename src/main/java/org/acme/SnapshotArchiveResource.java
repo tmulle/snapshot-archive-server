@@ -2,6 +2,7 @@ package org.acme;
 
 import org.acme.exceptions.InvalidRequestException;
 import org.acme.service.MongoGridFSService;
+import org.acme.util.MarkableFileInputStream;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
@@ -21,6 +22,9 @@ import javax.json.Json;
 import javax.json.JsonObject;
 import javax.ws.rs.*;
 import javax.ws.rs.core.*;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -99,9 +103,7 @@ public class SnapshotArchiveResource {
                     content = @Content(mediaType = MediaType.APPLICATION_JSON))
     })
     public Response getFileInfo(@Parameter(description = "ID of the File") @PathParam("id") String id) {
-        return mongoGridFSService.getFileInfo(id)
-                .map(info -> Response.ok(info).build())
-                .orElseThrow(() -> new InvalidRequestException("ID " + id + " not found"));
+        return Response.ok(mongoGridFSService.getFileInfo(id)).build();
     }
 
     @DELETE
@@ -134,8 +136,17 @@ public class SnapshotArchiveResource {
     })
     public Response uploadFile(@RestForm("file") @Schema(implementation = UploadItemSchema.class) FileUpload fileData,
                                @Parameter(description = "Associated Help Desk Ticket Number") @QueryParam("ticketNumber") String ticketNumber) {
+
+
+
+        // Store the ticket number
+        Map<String, Object> metaData = new HashMap<>();
+        if (ticketNumber != null) {
+            metaData.put("ticketNumber", ticketNumber);
+        }
+
         // Perform the upload
-        ObjectId id = mongoGridFSService.uploadFile(fileData.uploadedFile(), fileData.fileName(), ticketNumber);
+        ObjectId id = mongoGridFSService.uploadFile(fileData.uploadedFile(), fileData.fileName(), metaData);
 
         // Build the location header response
         UriBuilder builder = uriInfo.getAbsolutePathBuilder();
@@ -188,8 +199,8 @@ public class SnapshotArchiveResource {
         StreamingOutput stream = output -> mongoGridFSService.downloadFile(id, output);
 
         // Get the filename so we can set the filename in the download headers
-        Optional<MongoGridFSService.FileInfo> info = mongoGridFSService.getFileInfo(id);
-        String fileName = info.map(MongoGridFSService.FileInfo::getFilename).orElse("download.bin");
+        MongoGridFSService.FileInfo info = mongoGridFSService.getFileInfo(id);
+        String fileName = info.getFilename();
 
         return Response.ok(stream).header("Content-Disposition", "attachment; filename=" + fileName).build();
     }

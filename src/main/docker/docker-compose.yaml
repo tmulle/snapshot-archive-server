@@ -1,11 +1,13 @@
-version: "3.0"
 services:
   snap-archive-server:
     image: quarkus/code-with-quarkus-jvm
-    container_name: snapserver
     ports:
-      - 8080:8080
+      - "8080"
     environment:
       - MONGO_DB_URL=mongodb://root:example@host.docker.internal:27017
     restart: unless-stopped
+#    deploy:
+#      mode: replicated
+#      replicas: 2
+
 
