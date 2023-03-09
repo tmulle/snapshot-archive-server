@@ -1,8 +1,6 @@
 package org.acme;
 
-import org.acme.exceptions.InvalidRequestException;
 import org.acme.service.MongoGridFSService;
-import org.acme.util.MarkableFileInputStream;
 import org.bson.types.ObjectId;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
@@ -22,12 +20,8 @@ import javax.json.Json;
 import javax.json.JsonObject;
 import javax.ws.rs.*;
 import javax.ws.rs.core.*;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * REST endpoint that allows files to be uploaded/downloaded from a MongoDB GridFS backend
@@ -38,7 +32,6 @@ import java.util.Optional;
 @Tag(name = "Snapshot Archive Resource", description = "JAX-RS Resource that handles file operations with MongoDB")
 public class SnapshotArchiveResource {
 
-    private final static Logger LOG = LoggerFactory.getLogger(SnapshotArchiveResource.class);
 
     @Context
     UriInfo uriInfo;
